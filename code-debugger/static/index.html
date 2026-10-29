@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code Debugger</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --surface: #ffffff; --ink: #14181f; --muted: #5b6573;
+    --line: #dde1e7; --accent: #1f5eff; --accent-ink: #ffffff;
+    --critical: #c4261d; --high: #d9570f; --medium: #a37a00; --low: #4b6a88;
+    --code-bg: #eef0f4;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1218; --surface: #171b23; --ink: #e8ebf0; --muted: #98a2b0;
+      --line: #2a303b; --accent: #6b94ff; --accent-ink: #0f1218;
+      --critical: #ff6b61; --high: #ff9a5c; --medium: #e0b640; --low: #8fb0d1;
+      --code-bg: #1e232d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 var(--sans); }
+  header { padding: 20px 28px; border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -0.01em; }
+  header p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; padding: 20px 28px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 16px; } }
+  section { min-width: 0; }
+  label { display: block; font-weight: 600; margin-bottom: 8px; }
+  textarea {
+    width: 100%; height: 460px; resize: vertical; padding: 14px;
+    font: 13px/1.5 var(--mono); color: var(--ink); background: var(--surface);
+    border: 1px solid var(--line); border-radius: 6px; tab-size: 4;
+  }
+  textarea:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .row { display: flex; gap: 12px; align-items: center; margin-top: 12px; }
+  button {
+    background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 6px;
+    padding: 10px 18px; font: 600 14px var(--sans); cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: wait; }
+  .hint { color: var(--muted); font-size: 13px; }
+  #out { min-height: 200px; }
+  .empty { color: var(--muted); padding: 40px 0; }
+  .error { color: var(--critical); }
+  .block { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; margin-bottom: 14px; }
+  .block h2 { margin: 0 0 6px; font-size: 14px; }
+  .block p { margin: 0; color: var(--muted); }
+  .finding { border-left: 4px solid var(--low); }
+  .finding.critical { border-left-color: var(--critical); }
+  .finding.high { border-left-color: var(--high); }
+  .finding.medium { border-left-color: var(--medium); }
+  .finding h3 { margin: 0 0 4px; font-size: 15px; }
+  .meta { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+  .sev { font-weight: 700; }
+  .sev.critical { color: var(--critical); } .sev.high { color: var(--high); }
+  .sev.medium { color: var(--medium); } .sev.low { color: var(--low); }
+  pre { margin: 8px 0 0; padding: 10px 12px; background: var(--code-bg); border-radius: 4px; overflow-x: auto; font: 12.5px/1.5 var(--mono); }
+  .lbl { font-size: 13px; font-weight: 600; margin-top: 10px; }
+  .badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; margin-left: 6px;
+           border: 1px solid var(--accent); color: var(--accent); border-radius: 10px; }
+  details { margin-bottom: 14px; }
+  summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+  .trace li { margin: 4px 0; font-size: 13px; }
+  .trace code { font-family: var(--mono); color: var(--ink); }
+  .pre-wrap { white-space: pre-wrap; }
+  ul { margin: 6px 0 0; padding-left: 20px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Code Debugger</h1>
+  <p>Paste Python code. Get bugs, architecture notes and fixes.</p>
+</header>
+<main>
+  <section>
+    <label for="code">Your code</label>
+    <textarea id="code" spellcheck="false" placeholder="Paste a Python snippet here"></textarea>
+    <div class="row">
+      <button id="go">Analyze code</button>
+      <button id="sample" type="button" style="background:transparent;color:var(--accent);border:1px solid var(--line)">Load sample</button>
+      <span class="hint" id="status"></span>
+    </div>
+  </section>
+  <section id="out" aria-live="polite">
+    <div class="empty">Your report will appear here.</div>
+  </section>
+</main>
+<script>
+const SAMPLE = `def average(nums):
+    total = 0
+    for i in range(1, len(nums)):
+        total += nums[i]
+    return total / len(nums)
+
+def find_user(db, name):
+    query = "SELECT * FROM users WHERE name = '" + name + "'"
+    return db.execute(query)
+
+def read_config(path):
+    f = open(path)
+    return f.read()
+`;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+$("sample").onclick = () => { $("code").value = SAMPLE; };
+
+$("go").onclick = async () => {
+  const code = $("code").value;
+  if (!code.trim()) { $("out").innerHTML = '<div class="empty">Paste some code first.</div>'; return; }
+  $("go").disabled = true; $("status").textContent = "Analyzing...";
+  try {
+    const res = await fetch("/analyze", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, language: "python" }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Request failed");
+    render(data);
+  } catch (e) {
+    $("out").innerHTML = `<div class="error">${esc(e.message)}</div>`;
+  } finally {
+    $("go").disabled = false; $("status").textContent = "";
+  }
+};
+
+function render(data) {
+  const r = data.report, dropped = data.dropped_findings, trace = data.trace || [];
+  const findings = r.findings.map((f) => `
+    <div class="block finding ${f.severity}">
+      <h3>${esc(f.title)}${f.confirmed_by ? `<span class="badge">confirmed by ${esc(f.confirmed_by)}</span>` : ""}</h3>
+      <div class="meta"><span class="sev ${f.severity}">${f.severity}</span> ${esc(f.category)}, lines ${f.line_start}-${f.line_end}</div>
+      <div>${esc(f.explanation)}</div>
+      <pre>${esc(f.evidence)}</pre>
+      <div class="lbl">Suggested fix</div>
+      <pre>${esc(f.suggested_fix)}</pre>
+    </div>`).join("");
+  const tokens = data.usage ? data.usage.input_tokens + data.usage.output_tokens : 0;
+  const steps = trace.map((t) =>
+    `<li><code>${esc(t.tool)}(${esc(t.args)})</code> <span class="hint">${t.ok ? "" : "FAILED "}${esc(t.result)}</span></li>`).join("");
+  $("out").innerHTML = `
+    <div class="block"><h2>Summary</h2><p>${esc(r.summary)}</p></div>
+    <div class="block"><h2>How the code works</h2><p class="pre-wrap">${esc(r.walkthrough)}</p></div>
+    <div class="block"><h2>Architecture</h2><p class="pre-wrap">${esc(r.architecture_notes)}</p></div>
+    <h2 style="font-size:15px;margin:18px 0 10px">Findings (${r.findings.length})</h2>
+    ${findings || '<div class="empty">No issues found.</div>'}
+    ${dropped ? `<p class="hint">${dropped} finding(s) removed because their evidence was not in your code.</p>` : ""}
+    <div class="block"><h2>Improvements</h2><ul>${r.improvements.map((i) => `<li>${esc(i)}</li>`).join("")}</ul></div>
+    <details><summary>How the agent worked (${trace.length} tool calls, ${tokens.toLocaleString()} tokens)</summary>
+      <ol class="trace">${steps || "<li>No tools used.</li>"}</ol></details>`;
+}
+</script>
+</body>
+</html>
